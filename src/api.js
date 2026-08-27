@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const BASE = '/api'
+const BASE = import.meta.env.VITE_API_URL || 'http://15.206.180.134:8000/api'
 
 export const api = {
   status:         () => axios.get(`${BASE}/status`),
@@ -18,7 +18,8 @@ export const api = {
 }
 
 export function createWS(onMessage) {
-  const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/live`)
+  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://15.206.180.134:8000/ws/live'
+  const ws = new WebSocket(wsUrl)
   ws.onmessage = e => { try { onMessage(JSON.parse(e.data)) } catch {} }
   ws.onerror   = () => console.warn('WS error')
   return ws
