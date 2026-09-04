@@ -5,6 +5,7 @@ import ApplicationsTab from './components/tabs/ApplicationsTab'
 import AIMonitorTab from './components/tabs/AIMonitorTab'
 import HealthTab from './components/tabs/HealthTab'
 import AlertsTab from './components/tabs/AlertsTab'
+import LiveLogsTab from './components/tabs/LiveLogsTab'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('applications')
@@ -34,6 +35,7 @@ export default function App() {
   const tabs = [
     { id: 'applications', label: 'Applications' },
     { id: 'ai-monitor',   label: 'AI Monitor'   },
+    { id: 'live-logs',    label: 'Live Logs'     },
     { id: 'health',       label: 'CPU / RAM'     },
     { id: 'alerts',       label: 'Alerts'        },
   ]
@@ -45,6 +47,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto p-6">
         {activeTab === 'applications' && <ApplicationsTab liveData={liveData} />}
         {activeTab === 'ai-monitor'   && <AIMonitorTab   liveData={liveData} />}
+        {activeTab === 'live-logs'    && <LiveLogsTab     liveData={liveData} />}
         {activeTab === 'health'       && <HealthTab       liveData={liveData} />}
         {activeTab === 'alerts'       && <AlertsTab       liveData={liveData} />}
       </main>

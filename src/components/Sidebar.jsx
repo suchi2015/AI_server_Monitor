@@ -1,10 +1,11 @@
-import { Activity, Cpu, Bell, Brain, Server } from 'lucide-react'
+import { Activity, Cpu, Bell, Brain, Server, Terminal } from 'lucide-react'
 
 const ICONS = {
   'applications': Server,
   'ai-monitor':   Brain,
   'health':       Cpu,
   'alerts':       Bell,
+  'live-logs':    Terminal,
 }
 
 export default function Sidebar({ tabs, activeTab, setActiveTab, liveData }) {
