@@ -52,6 +52,22 @@ class IncidentManager:
             self.correlator.close_incident(incident_id)
         self._update_status(incident_id, "resolved")
 
+    def clear_all(self):
+        """Delete all incidents from DB and reset correlator state."""
+        with self.lock:
+            self.correlator = CorrelationEngine(
+                time_window=self.correlator.time_window,
+                burst_threshold=self.correlator.burst_threshold
+            )
+        try:
+            con = sqlite3.connect(DB_PATH)
+            con.execute("DELETE FROM incidents")
+            con.commit()
+            con.close()
+            logger.info("All incidents cleared.")
+        except Exception as e:
+            logger.error(f"Clear error: {e}")
+
     # ── enrichment ────────────────────────────────────────────────────────────
 
     def _enrich(self, incident: dict):
