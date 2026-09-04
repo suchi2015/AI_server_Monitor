@@ -9,24 +9,39 @@ except ImportError:
     PSUTIL = False
 
 # ── HTTP status code → severity ───────────────────────────────────────────────
+# Matches: "POST /api/login 401 45ms" or "GET / 200 12ms" style lines
+HTTP_LOG_RE = re.compile(
+    r'(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+\s+(\d{3})',
+    re.IGNORECASE
+)
+# Fallback: any standalone 3-digit number that looks like HTTP status
 HTTP_STATUS_RE = re.compile(r'\b([1-5]\d{2})\b')
 
 def _severity_from_line(line: str) -> str:
     """
     Determine severity from a log line:
     1. Check for explicit keywords (ERROR, WARNING, etc.)
-    2. Check for HTTP status codes (401 → WARNING, 500 → ERROR, 200 → INFO)
-    3. Default to INFO
+    2. Check for HTTP method + status pattern (POST /api/login 401)
+    3. Check for standalone HTTP status codes
+    4. Default to INFO
     """
     upper = line.upper()
 
-    # Explicit severity keywords — check these first
-    for kw in ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "DEBUG", "INFO"):
+    # Explicit severity keywords — highest priority
+    for kw in ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "DEBUG"):
         if kw in upper:
             return "CRITICAL" if kw == "FATAL" else kw
 
-    # HTTP status codes
-    for code_str in reversed(HTTP_STATUS_RE.findall(line)):
+    # HTTP method + status pattern — most reliable for access logs
+    m = HTTP_LOG_RE.search(line)
+    if m:
+        code = int(m.group(1))
+        if code >= 500: return "ERROR"
+        if code >= 400: return "WARNING"
+        return "INFO"
+
+    # Fallback: standalone 3-digit status code
+    for code_str in HTTP_STATUS_RE.findall(line):
         code = int(code_str)
         if 500 <= code <= 599: return "ERROR"
         if 400 <= code <= 499: return "WARNING"
@@ -152,8 +167,9 @@ class LogTailer:
         """Parse a raw log line into a structured entry dict."""
         stripped = line.strip()
 
-        # Extract timestamp if present
+        # Extract timestamp if present in the line itself
         ts_match = self.TIMESTAMP_RE.search(stripped)
+        # If no timestamp in line, use current time (live log)
         timestamp = ts_match.group("ts") if ts_match else datetime.datetime.now().isoformat()
 
         # Determine severity
@@ -195,7 +211,13 @@ class LogTailer:
                             break
                         continue
                     if line.strip():
-                        self.callback(self._parse_entry(line, app_name))
+                        entry = self._parse_entry(line, app_name)
+                        # For live lines: if no timestamp in the line itself,
+                        # always use current time (not replayed old time)
+                        ts_match = self.TIMESTAMP_RE.search(line.strip())
+                        if not ts_match:
+                            entry["timestamp"] = datetime.datetime.now().isoformat()
+                        self.callback(entry)
 
         except Exception as e:
             logger.error(f"Tailer error for {path}: {e}")
