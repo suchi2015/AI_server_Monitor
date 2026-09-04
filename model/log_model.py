@@ -118,15 +118,16 @@ class LogModel:
                   "template": self.parser.get_template_by_id(tid),
                   "is_anomaly": False, "anomaly_score": 0.0, "explanation": ""}
         sw = self.SEV.get(parsed["severity"], 0)
-        if sw >= 3:
+        # WARNING (sw=2) → flag as anomaly too, not just ERROR/CRITICAL
+        if sw >= 2:
             result["is_anomaly"]    = True
-            result["anomaly_score"] = 0.7 + (sw-3)*0.15
+            result["anomaly_score"] = 0.5 + (sw - 2) * 0.2   # WARNING=0.5, ERROR=0.7, CRITICAL=0.9
             result["explanation"]   = (
                 f"{parsed['severity']} in [{parsed['app']}]: {parsed['message'][:120]}")
         if self.is_trained and len(self.sequence) >= self.window_size+1:
             window = self.sequence[-(self.window_size+1):-1]
             score, bad = self._predict_anomaly(window, tid)
-            if bad:
+            if bad and score > 0.85:  # only flag high confidence anomalies
                 result["is_anomaly"]    = True
                 result["anomaly_score"] = max(result["anomaly_score"], score)
                 result["explanation"]   = (

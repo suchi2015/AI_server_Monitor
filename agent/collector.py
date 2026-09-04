@@ -8,6 +8,35 @@ try:
 except ImportError:
     PSUTIL = False
 
+# Detect HTTP status codes in log lines and map to severity
+HTTP_STATUS_RE = re.compile(r'\b([1-5]\d{2})\b')
+
+def _severity_from_http(line: str) -> Optional[str]:
+    """
+    Scan a log line for HTTP status codes.
+    Returns severity string if found, else None.
+    """
+    matches = HTTP_STATUS_RE.findall(line)
+    if not matches:
+        return None
+    # Take the last numeric match that looks like HTTP status
+    for code_str in reversed(matches):
+        code = int(code_str)
+        if 100 <= code <= 599:
+            if code >= 500:
+                return "ERROR"
+            elif code == 404:
+                return "WARNING"
+            elif code in (401, 403):
+                return "WARNING"
+            elif 400 <= code < 500:
+                return "WARNING"
+            elif 300 <= code < 400:
+                return "INFO"
+            elif 200 <= code < 300:
+                return "INFO"
+    return None
+
 class MetricsCollector:
     def __init__(self, callback, interval=5.0,
                  cpu_threshold=80.0, ram_threshold=85.0, disk_threshold=90.0,
@@ -94,12 +123,28 @@ class LogTailer:
                 if not line:
                     time.sleep(0.1)
                     continue
-                m = self.LOG_RE.match(line.strip())
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                m = self.LOG_RE.match(stripped)
+
+                # Determine severity:
+                # 1. Try explicit keyword (ERROR, WARNING, etc.)
+                # 2. Fall back to HTTP status code detection
+                # 3. Default to INFO
+                explicit_sev = (m.group("severity") if m else None)
+                if explicit_sev:
+                    severity = explicit_sev.upper()
+                else:
+                    http_sev = _severity_from_http(stripped)
+                    severity = http_sev if http_sev else "INFO"
+
                 entry = {
-                    "raw":       line.strip(),
+                    "raw":       stripped,
                     "timestamp": (m.group("timestamp") if m else None) or datetime.datetime.now().isoformat(),
-                    "severity":  ((m.group("severity") if m else None) or "INFO").upper(),
+                    "severity":  severity,
                     "app":       (m.group("app") if m else None) or os.path.basename(path),
-                    "message":   (m.group("message") if m else None) or line.strip(),
+                    "message":   stripped,
                 }
                 self.callback(entry)

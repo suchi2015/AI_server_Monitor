@@ -1,11 +1,19 @@
+# Python 3.11 required (torch has no wheel for 3.14)
+# On EC2: sudo apt install python3.11 python3.11-venv
+
+# ML
 drain3==0.9.11
 torch==2.2.2
 numpy==1.26.4
 scikit-learn==1.4.2
+
+# Backend
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
 pydantic==2.7.1
 python-dotenv==1.0.1
+
+# System
 psutil==5.9.8
 loguru==0.7.2
 requests==2.32.3

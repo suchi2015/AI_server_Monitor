@@ -77,7 +77,7 @@ def on_log(entry: dict):
         sev = result.get("severity", "INFO")
         if sev in ("ERROR", "CRITICAL", "FATAL"):
             state.app_stats[app_name]["errors"] += 1
-        elif sev == "WARNING":
+        elif sev in ("WARNING", "WARN"):
             state.app_stats[app_name]["warnings"] += 1
 
         if result.get("is_anomaly"):
@@ -163,10 +163,10 @@ async def startup():
 
     if DEMO_MODE:
         from simulator.log_simulator import LogSimulator, generate_log_line
-        logger.info("Demo mode: pre-training on 300 logs...")
-        normal = [generate_log_line(force_anomaly=False)["raw"] for _ in range(300)]
+        logger.info("Demo mode: pre-training on 500 logs...")
+        normal = [generate_log_line(force_anomaly=False)["raw"] for _ in range(500)]
         await _loop.run_in_executor(None,
-            lambda: state.model.train_on_logs(normal, epochs=30))
+            lambda: state.model.train_on_logs(normal, epochs=80))
         state.training_done = True
         from simulator.multi_app_simulator import MultiAppSimulator
         sim = MultiAppSimulator(on_log, on_metrics, list(APPS.keys()))
