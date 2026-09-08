@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const BASE = import.meta.env.VITE_API_URL || 'http://15.206.180.134:8000/api'
+const BASE = import.meta.env.VITE_API_URL || 'http://15.206.180.134/AIMonitor-api'
 
 export const api = {
   status:          () => axios.get(`${BASE}/status`),
@@ -23,14 +23,10 @@ export const api = {
 
   // Escalations
   escalations:     ()               => axios.get(`${BASE}/escalations`),
-
-  // Generic helpers used in HealthTab
-  get:             (path)           => axios.get(`${BASE.replace('/api','')}${path}`),
-  post:            (path, data)     => axios.post(`${BASE.replace('/api','')}${path}`, data),
 }
 
 export function createWS(onMessage) {
-  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://15.206.180.134:8000/ws/live'
+  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://15.206.180.134/AIMonitor-ws/live'
   const ws = new WebSocket(wsUrl)
   ws.onmessage = e => { try { onMessage(JSON.parse(e.data)) } catch {} }
   ws.onerror   = () => console.warn('WS error')
