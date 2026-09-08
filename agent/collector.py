@@ -16,36 +16,55 @@ HTTP_LOG_RE = re.compile(
 )
 # Fallback: any standalone 3-digit number that looks like HTTP status
 HTTP_STATUS_RE = re.compile(r'\b([1-5]\d{2})\b')
+# ANSI escape codes — strip these before parsing
+ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
 def _severity_from_line(line: str) -> str:
     """
-    Determine severity from a log line:
-    1. Check for explicit keywords (ERROR, WARNING, etc.)
-    2. Check for HTTP method + status pattern (POST /api/login 401)
-    3. Check for standalone HTTP status codes
-    4. Default to INFO
+    Determine severity from a log line.
+    Priority:
+    1. HTTP method + status pattern — most reliable (POST /api/login 401)
+    2. Explicit keywords — but ONLY if not part of uvicorn INFO: prefix
+    3. Standalone HTTP status codes
+    4. Default INFO
     """
-    upper = line.upper()
+    # Strip ANSI color codes first
+    clean = ANSI_RE.sub('', line)
 
-    # Explicit severity keywords — highest priority
-    for kw in ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "DEBUG"):
-        if kw in upper:
-            return "CRITICAL" if kw == "FATAL" else kw
-
-    # HTTP method + status pattern — most reliable for access logs
-    m = HTTP_LOG_RE.search(line)
+    # 1. HTTP method + status — highest priority for access logs
+    m = HTTP_LOG_RE.search(clean)
     if m:
         code = int(m.group(1))
         if code >= 500: return "ERROR"
         if code >= 400: return "WARNING"
         return "INFO"
 
-    # Fallback: standalone 3-digit status code
-    for code_str in HTTP_STATUS_RE.findall(line):
+    upper = clean.upper()
+
+    # 2. Keywords — skip uvicorn's "INFO: " prefix pattern
+    # uvicorn writes "INFO:     IP - METHOD PATH STATUS" — the INFO here is
+    # the logger prefix, not the actual severity of the HTTP response
+    # So only use keyword if there's no HTTP status code anywhere in the line
+    has_http_code = bool(HTTP_STATUS_RE.search(clean))
+    if not has_http_code:
+        for kw in ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "DEBUG"):
+            if kw in upper:
+                return "CRITICAL" if kw == "FATAL" else kw
+
+    # 3. Fallback standalone status code
+    for code_str in HTTP_STATUS_RE.findall(clean):
         code = int(code_str)
         if 500 <= code <= 599: return "ERROR"
         if 400 <= code <= 499: return "WARNING"
         if 200 <= code <= 399: return "INFO"
+
+    # 4. Keywords for non-HTTP lines (no status code present)
+    if not has_http_code:
+        pass  # already handled above
+    else:
+        for kw in ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "DEBUG"):
+            if kw in upper:
+                return "CRITICAL" if kw == "FATAL" else kw
 
     return "INFO"
 
@@ -166,21 +185,22 @@ class LogTailer:
     def _parse_entry(self, line: str, app_name: str) -> dict:
         """Parse a raw log line into a structured entry dict."""
         stripped = line.strip()
+        # Strip ANSI color codes from raw line before storing
+        clean = ANSI_RE.sub('', stripped)
 
         # Extract timestamp if present in the line itself
-        ts_match = self.TIMESTAMP_RE.search(stripped)
-        # If no timestamp in line, use current time (live log)
+        ts_match = self.TIMESTAMP_RE.search(clean)
         timestamp = ts_match.group("ts") if ts_match else datetime.datetime.now().isoformat()
 
         # Determine severity
-        severity = _severity_from_line(stripped)
+        severity = _severity_from_line(clean)
 
         return {
-            "raw":       stripped,
+            "raw":       clean,       # store clean version, not ANSI-encoded
             "timestamp": timestamp,
             "severity":  severity,
             "app":       app_name,
-            "message":   stripped,
+            "message":   clean,
         }
 
     def _tail(self, path: str):
@@ -212,9 +232,9 @@ class LogTailer:
                         continue
                     if line.strip():
                         entry = self._parse_entry(line, app_name)
-                        # For live lines: if no timestamp in the line itself,
-                        # always use current time (not replayed old time)
-                        ts_match = self.TIMESTAMP_RE.search(line.strip())
+                        # For live lines with no timestamp in line, use current time
+                        clean = ANSI_RE.sub('', line.strip())
+                        ts_match = self.TIMESTAMP_RE.search(clean)
                         if not ts_match:
                             entry["timestamp"] = datetime.datetime.now().isoformat()
                         self.callback(entry)

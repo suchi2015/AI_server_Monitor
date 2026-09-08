@@ -70,6 +70,10 @@ def on_log(entry: dict):
 
     result["timestamp"] = result.get("timestamp") or entry.get("timestamp") or datetime.datetime.now().isoformat()
     result["app"]       = entry.get("app") or result.get("app") or "unknown"
+    # Preserve severity detected by collector (HTTP 4xx/5xx detection)
+    # log_model re-parses and may set INFO — collector is more accurate for HTTP logs
+    if entry.get("severity") and entry["severity"] != "INFO":
+        result["severity"] = entry["severity"]
 
     with state.lock:
         state.logs.append(result)
@@ -187,26 +191,19 @@ async def startup():
         logger.info("Demo simulator started.")
     else:
         from agent.collector import MetricsCollector, LogTailer
-        tailed = 0
         for app_name, log_path in APPS.items():
-            if log_path and os.path.exists(log_path):
+            if log_path:
                 LogTailer(
                     [log_path],
                     lambda e, a=app_name: on_log({**e, "app": a}),
-                    tail_existing=100          # load last 100 lines on startup
+                    tail_existing=0          # only new lines — no replay on restart
                 ).start()
-                logger.info(f"Tailing {app_name}: {log_path}")
-                tailed += 1
-            elif log_path:
-                # File doesn't exist yet — wait for it to appear
-                LogTailer(
-                    [log_path],
-                    lambda e, a=app_name: on_log({**e, "app": a}),
-                    tail_existing=100
-                ).start()
-                logger.warning(f"Log not found yet for {app_name}: {log_path} — waiting...")
+                if os.path.exists(log_path):
+                    logger.info(f"Tailing {app_name}: {log_path}")
+                else:
+                    logger.warning(f"Waiting for log file: {log_path}")
             else:
-                logger.info(f"{app_name}: no log path in .env — use HTTP push (/api/ingest)")
+                logger.info(f"{app_name}: no log path set in .env")
 
         MetricsCollector(on_metrics,
                          cpu_threshold=CPU_THRESHOLD,
