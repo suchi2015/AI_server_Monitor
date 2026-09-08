@@ -9,62 +9,35 @@ except ImportError:
     PSUTIL = False
 
 # ── HTTP status code → severity ───────────────────────────────────────────────
-# Matches: "POST /api/login 401 45ms" or "GET / 200 12ms" style lines
-HTTP_LOG_RE = re.compile(
-    r'(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+\s+(\d{3})',
-    re.IGNORECASE
-)
-# Fallback: any standalone 3-digit number that looks like HTTP status
-HTTP_STATUS_RE = re.compile(r'\b([1-5]\d{2})\b')
-# ANSI escape codes — strip these before parsing
+# ANSI escape codes — strip before parsing
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+# Fallback standalone 3-digit status code
+HTTP_STATUS_RE = re.compile(r'\b([1-5]\d{2})\b')
+
 
 def _severity_from_line(line: str) -> str:
-    """
-    Determine severity from a log line.
-    Priority:
-    1. HTTP method + status pattern — most reliable (POST /api/login 401)
-    2. Explicit keywords — but ONLY if not part of uvicorn INFO: prefix
-    3. Standalone HTTP status codes
-    4. Default INFO
-    """
-    # Strip ANSI color codes first
+    """Detect severity from any log line format."""
     clean = ANSI_RE.sub('', line)
 
-    # 1. HTTP method + status — highest priority for access logs
-    m = HTTP_LOG_RE.search(clean)
+    # Match HTTP method followed eventually by a 3-digit status code
+    # Handles both:
+    #   express:  POST /api/login 401 243ms
+    #   uvicorn:  INFO: x - "GET /path HTTP/1.1" 404 Not Found
+    m = re.search(
+        r'(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+.{0,50}\s(\d{3})\b',
+        clean, re.IGNORECASE
+    )
     if m:
         code = int(m.group(1))
         if code >= 500: return "ERROR"
         if code >= 400: return "WARNING"
-        return "INFO"
+        if code >= 100: return "INFO"
 
+    # Explicit severity keywords
     upper = clean.upper()
-
-    # 2. Keywords — skip uvicorn's "INFO: " prefix pattern
-    # uvicorn writes "INFO:     IP - METHOD PATH STATUS" — the INFO here is
-    # the logger prefix, not the actual severity of the HTTP response
-    # So only use keyword if there's no HTTP status code anywhere in the line
-    has_http_code = bool(HTTP_STATUS_RE.search(clean))
-    if not has_http_code:
-        for kw in ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "DEBUG"):
-            if kw in upper:
-                return "CRITICAL" if kw == "FATAL" else kw
-
-    # 3. Fallback standalone status code
-    for code_str in HTTP_STATUS_RE.findall(clean):
-        code = int(code_str)
-        if 500 <= code <= 599: return "ERROR"
-        if 400 <= code <= 499: return "WARNING"
-        if 200 <= code <= 399: return "INFO"
-
-    # 4. Keywords for non-HTTP lines (no status code present)
-    if not has_http_code:
-        pass  # already handled above
-    else:
-        for kw in ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "DEBUG"):
-            if kw in upper:
-                return "CRITICAL" if kw == "FATAL" else kw
+    for kw in ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "DEBUG"):
+        if kw in upper:
+            return "CRITICAL" if kw == "FATAL" else kw
 
     return "INFO"
 
