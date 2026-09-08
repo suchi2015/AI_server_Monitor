@@ -19,19 +19,21 @@ def _severity_from_line(line: str) -> str:
     """Detect severity from any log line format."""
     clean = ANSI_RE.sub('', line)
 
-    # Match HTTP method followed eventually by a 3-digit status code
+    # Match HTTP method + path + status code
     # Handles both:
-    #   express:  POST /api/login 401 243ms
+    #   express:  POST /api/login 401 243ms       (status right after path)
     #   uvicorn:  INFO: x - "GET /path HTTP/1.1" 404 Not Found
+    # Use non-greedy match, and anchor status code to NOT be preceded by a dot
+    # (to avoid matching 243 from "243.872 ms")
     m = re.search(
-        r'(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+.{0,50}\s(\d{3})\b',
+        r'(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+(?:\s+HTTP/[\d.]+)?["\s]+([1-5]\d{2})\b',
         clean, re.IGNORECASE
     )
     if m:
         code = int(m.group(1))
         if code >= 500: return "ERROR"
         if code >= 400: return "WARNING"
-        if code >= 100: return "INFO"
+        return "INFO"
 
     # Explicit severity keywords
     upper = clean.upper()
