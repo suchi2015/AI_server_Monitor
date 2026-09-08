@@ -10,6 +10,7 @@ import os, sys, asyncio, json, time, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -20,6 +21,7 @@ load_dotenv()
 from state import state
 from incidents import IncidentManager
 from model.log_model import LogModel
+from escalation import EscalationManager
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DEMO_MODE      = os.getenv("DEMO_MODE", "False").lower() == "true"
@@ -149,6 +151,7 @@ def on_metrics(metrics: dict):
         for a in alerts: state.alerts.append(a)
     for a in alerts:
         state.incident_mgr.process_event(a)
+        state.esc_mgr.trigger(a)          # ← start escalation
         _broadcast({"type": "alert", "data": a})
     _broadcast({"type": "metrics", "data": metrics})
 
@@ -169,6 +172,9 @@ async def startup():
 
     state.model        = LogModel(window_size=WINDOW_SIZE)
     state.incident_mgr = IncidentManager()
+    state.esc_mgr      = EscalationManager(
+        incident_callback=lambda a: state.incident_mgr.process_event(a)
+    )
 
     # Init known apps
     for app_name in APPS:
@@ -306,6 +312,71 @@ def clear_all_incidents():
     """Delete all incidents — clears dummy/old data from demo mode."""
     state.incident_mgr.clear_all()
     return {"status": "cleared"}
+
+
+# ── Threshold API — get/update thresholds at runtime ─────────────────────────
+
+class ThresholdUpdate(BaseModel):
+    cpu:  Optional[float] = None
+    ram:  Optional[float] = None
+    disk: Optional[float] = None
+
+@app.get("/api/thresholds")
+def get_thresholds():
+    return {
+        "cpu":  CPU_THRESHOLD,
+        "ram":  RAM_THRESHOLD,
+        "disk": DISK_THRESHOLD,
+    }
+
+@app.post("/api/thresholds")
+def update_thresholds(req: ThresholdUpdate):
+    global CPU_THRESHOLD, RAM_THRESHOLD, DISK_THRESHOLD
+    if req.cpu  is not None: CPU_THRESHOLD  = req.cpu
+    if req.ram  is not None: RAM_THRESHOLD  = req.ram
+    if req.disk is not None: DISK_THRESHOLD = req.disk
+    logger.info(f"Thresholds updated: CPU={CPU_THRESHOLD} RAM={RAM_THRESHOLD} DISK={DISK_THRESHOLD}")
+    return {"status": "ok", "cpu": CPU_THRESHOLD, "ram": RAM_THRESHOLD, "disk": DISK_THRESHOLD}
+
+
+# ── Escalation API ────────────────────────────────────────────────────────────
+
+@app.get("/api/escalation/ack/{token}")
+def acknowledge_escalation(token: str):
+    """Called when user clicks Acknowledge in email."""
+    result = state.esc_mgr.acknowledge(token)
+    status = result.get("status")
+    msg    = result.get("message", "")
+    color  = "#238636" if status == "ok" else "#f85149" if status == "error" else "#f59e0b"
+    # Return a nice HTML page
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head><title>Alert Acknowledged</title>
+<style>
+  body {{background:#0d1117;color:#e6edf3;font-family:Arial,sans-serif;
+         display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
+  .box {{background:#161b22;border:1px solid #30363d;border-radius:12px;
+         padding:40px;max-width:480px;text-align:center}}
+  h2 {{color:{color};margin-bottom:8px}}
+  p {{color:#8b949e}}
+  a {{color:#58a6ff;text-decoration:none}}
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>{'✅ Acknowledged' if status == 'ok' else '⚠ ' + status.replace('_',' ').title()}</h2>
+  <p>{msg}</p>
+  <p style="margin-top:24px"><a href="/AIMonitor/">← Back to Dashboard</a></p>
+</div>
+</body>
+</html>
+""", status_code=200)
+
+
+@app.get("/api/escalations")
+def get_escalations():
+    return {"escalations": state.esc_mgr.get_all(20)}
 
 
 # ── HTTP Push endpoint — apps send logs directly, no file needed ──────────────

@@ -8,9 +8,10 @@ class AppState:
         self.anomalies     = deque(maxlen=500)
         self.metrics       = deque(maxlen=300)
         self.alerts        = deque(maxlen=500)
-        self.app_stats     = {}   # app_name -> stats dict
+        self.app_stats     = {}
         self.model         = None
         self.incident_mgr  = None
+        self.esc_mgr       = None
         self.training_done = False
 
 state = AppState()
