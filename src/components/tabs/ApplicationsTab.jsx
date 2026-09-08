@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../api'
-import { CheckCircle, AlertTriangle, XCircle, ChevronRight, RefreshCw, Activity } from 'lucide-react'
+import { CheckCircle, AlertTriangle, XCircle, RefreshCw, Activity, Sparkles, X } from 'lucide-react'
 
 const STATUS_CONFIG = {
   healthy:  { icon: CheckCircle,   color: 'text-green-400',  bg: 'bg-green-400/10', label: 'Healthy'  },
@@ -103,13 +103,87 @@ function LogRow({ log }) {
   const sev = log.severity || 'INFO'
   const rowBg = SEV_BG[sev] || ''
   const textColor = SEV_COLOR[sev] || 'text-gray-300'
+  const [aiExplanation, setAiExplanation] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const explain = () => {
+    if (aiExplanation) { setAiExplanation(null); return }
+    setLoading(true)
+    const raw = log.raw || log.message || ''
+    let explanation = ''
+    let suggestion  = ''
+
+    const httpMatch = raw.match(/(?:GET|POST|PUT|DELETE|PATCH)\s+(\S+)\s+(\d{3})/i)
+    if (httpMatch) {
+      const method = httpMatch[0].split(' ')[0].toUpperCase()
+      const path   = httpMatch[1]
+      const code   = parseInt(httpMatch[2])
+      if (code === 401) {
+        explanation = `${method} ${path} returned 401 Unauthorized — request rejected because no valid credentials were provided.`
+        suggestion  = 'Check if the auth token is missing, expired, or incorrect. Verify login credentials or API key.'
+      } else if (code === 403) {
+        explanation = `${method} ${path} returned 403 Forbidden — server understood the request but refused to authorize it.`
+        suggestion  = 'User is authenticated but lacks permission. Check role/permission settings.'
+      } else if (code === 404) {
+        explanation = `${method} ${path} returned 404 Not Found — the requested resource does not exist.`
+        suggestion  = 'Verify the URL path is correct. The resource may have been deleted or never existed.'
+      } else if (code >= 500) {
+        explanation = `${method} ${path} returned ${code} Server Error — the server crashed or hit an unhandled error.`
+        suggestion  = 'Check application logs for stack traces. Likely a code bug, DB issue, or out-of-memory error.'
+      } else {
+        explanation = `${method} ${path} returned ${code} — request completed successfully.`
+        suggestion  = 'No action needed. This is a normal response.'
+      }
+    } else if (raw.toLowerCase().includes('connection refused')) {
+      explanation = 'A service tried to connect to another service but was refused — the target is likely down or not listening.'
+      suggestion  = 'Check if the target service is running. Verify host and port configuration.'
+    } else if (raw.toLowerCase().includes('timeout')) {
+      explanation = 'A request or operation timed out — took longer than the allowed maximum time.'
+      suggestion  = 'Check network latency, DB query performance, or increase timeout limits.'
+    } else if (sev === 'ERROR' || sev === 'CRITICAL') {
+      explanation = `An ${sev} level event was detected in the application.`
+      suggestion  = 'Review full stack trace if available. Check recent code changes or config updates.'
+    } else if (sev === 'WARNING') {
+      explanation = 'A WARNING was logged — something unexpected happened but the app continued running.'
+      suggestion  = 'Monitor if this repeats frequently. Investigate before it becomes a hard error.'
+    } else {
+      explanation = `Severity: ${sev}. This log line was recorded by the application.`
+      suggestion  = sev === 'INFO' ? 'Informational log — no action needed.' : 'Review in context with surrounding logs.'
+    }
+
+    setTimeout(() => { setAiExplanation({ explanation, suggestion }); setLoading(false) }, 200)
+  }
+
   return (
-    <div className={`flex items-start gap-2 px-3 py-1.5 rounded hover:bg-[#21262d] transition font-mono text-xs ${rowBg}`}>
-      <span className="text-gray-600 shrink-0 w-20">{log.timestamp?.slice(11, 19)}</span>
-      <SevBadge sev={sev} />
-      <span className={`flex-1 break-all ${textColor}`}>{log.raw || log.message}</span>
-      {log.is_anomaly && (
-        <span className="text-red-400 text-xs shrink-0 ml-1">⚠</span>
+    <div className={`rounded transition group ${rowBg}`}>
+      <div className="flex items-start gap-2 px-3 py-1.5 hover:bg-white/5 font-mono text-xs">
+        <span className="text-gray-600 shrink-0 w-20">{log.timestamp?.slice(11, 19)}</span>
+        <SevBadge sev={sev} />
+        <span className={`flex-1 break-all ${textColor}`}>{log.raw || log.message}</span>
+        {log.is_anomaly && <span className="text-red-400 shrink-0 ml-1">⚠</span>}
+        <button
+          onClick={explain}
+          title="Understand with AI"
+          className={`shrink-0 flex items-center gap-1 text-xs px-2 py-0.5 rounded transition
+            opacity-0 group-hover:opacity-100
+            ${aiExplanation
+              ? 'bg-purple-500/30 text-purple-300 opacity-100'
+              : 'bg-[#21262d] text-gray-500 hover:text-purple-400 hover:bg-purple-500/20'}`}>
+          <Sparkles size={11} />
+          {loading ? '...' : aiExplanation ? 'Close' : 'Explain'}
+        </button>
+      </div>
+      {aiExplanation && (
+        <div className="mx-3 mb-2 p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg text-xs space-y-2">
+          <div className="flex items-center gap-1.5 text-purple-300 font-semibold">
+            <Sparkles size={12} /> AI Explanation
+          </div>
+          <p className="text-gray-300 leading-relaxed">{aiExplanation.explanation}</p>
+          <div className="flex items-start gap-1.5 pt-1 border-t border-purple-500/20">
+            <span className="text-purple-400 shrink-0 font-semibold">Suggestion:</span>
+            <span className="text-gray-400 leading-relaxed">{aiExplanation.suggestion}</span>
+          </div>
+        </div>
       )}
     </div>
   )
