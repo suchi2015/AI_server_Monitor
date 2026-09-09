@@ -6,7 +6,7 @@ Two ways apps can send logs:
   1. File tailing  — backend reads app's log file (DEMO_MODE=False + log path set)
   2. HTTP push     — app calls POST /api/ingest with log lines (easiest, no file needed)
 """
-import os, sys, asyncio, json, time, datetime
+import os, sys, asyncio, json, time, datetime, threading
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -22,6 +22,7 @@ from state import state
 from incidents import IncidentManager
 from model.log_model import LogModel
 from escalation import EscalationManager
+from servicenow import ServiceNowClient
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DEMO_MODE      = os.getenv("DEMO_MODE", "False").lower() == "true"
@@ -151,7 +152,11 @@ def on_metrics(metrics: dict):
         for a in alerts: state.alerts.append(a)
     for a in alerts:
         state.incident_mgr.process_event(a)
-        state.esc_mgr.trigger(a)          # ← start escalation
+        state.esc_mgr.trigger(a)
+        # Create ServiceNow incident for threshold breaches
+        threading.Thread(
+            target=state.snow.create_incident, args=(a,), daemon=True
+        ).start()
         _broadcast({"type": "alert", "data": a})
     _broadcast({"type": "metrics", "data": metrics})
 
@@ -175,6 +180,7 @@ async def startup():
     state.esc_mgr      = EscalationManager(
         incident_callback=lambda a: state.incident_mgr.process_event(a)
     )
+    state.snow         = ServiceNowClient()
 
     # Init known apps
     for app_name in APPS:
@@ -377,6 +383,14 @@ def acknowledge_escalation(token: str):
 @app.get("/api/escalations")
 def get_escalations():
     return {"escalations": state.esc_mgr.get_all(20)}
+
+
+# ── ServiceNow API ────────────────────────────────────────────────────────────
+
+@app.get("/api/snow/incidents")
+def get_snow_incidents():
+    """List all ServiceNow incidents created by AI Monitor."""
+    return {"incidents": state.snow.get_recent(50)}
 
 
 # ── HTTP Push endpoint — apps send logs directly, no file needed ──────────────

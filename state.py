@@ -12,6 +12,7 @@ class AppState:
         self.model         = None
         self.incident_mgr  = None
         self.esc_mgr       = None
+        self.snow          = None
         self.training_done = False
 
 state = AppState()
